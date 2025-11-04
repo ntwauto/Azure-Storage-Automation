@@ -1,4 +1,4 @@
-gitlab_azure_automation/
+`gitlab_azure_automation/
 ├── scripts/                      # Python automation scripts (for GitLab)
 ├── terraform/
 │   ├── main.tf                   # Calls module per environment
@@ -10,3 +10,4 @@ gitlab_azure_automation/
 │           ├── variables.tf
 │           └── outputs.tf
 └── .gitlab-ci.yml
+`
