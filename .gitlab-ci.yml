@@ -1,0 +1,30 @@
+stages:
+  - terraform
+
+variables:
+  TF_VAR_subgroup: "$SUBGROUP"
+  TF_VAR_project_name: "$CI_PROJECT_NAME"
+  TF_VAR_location: "eastus"
+
+terraform_apply:
+  stage: terraform
+  image: hashicorp/terraform:1.7.0
+  parallel:
+    matrix:
+      - ENVIRONMENT: ["QA", "UAT", "PROD"]
+
+  script:
+    - cd terraform
+    - terraform init \
+        -backend-config="resource_group_name=${SUBGROUP}-${ENVIRONMENT}-rg" \
+        -backend-config="storage_account_name=${SUBGROUP}${ENVIRONMENT}sa" \
+        -backend-config="container_name=${CI_PROJECT_NAME}-container" \
+        -backend-config="key=terraform.tfstate"
+    - terraform plan -out=tfplan
+    - terraform apply -auto-approve tfplan
+
+  variables:
+    ARM_CLIENT_ID: "$ARM_CLIENT_ID_${ENVIRONMENT}"
+    ARM_CLIENT_SECRET: "$ARM_CLIENT_SECRET_${ENVIRONMENT}"
+    ARM_TENANT_ID: "$ARM_TENANT_ID_${ENVIRONMENT}"
+    ARM_SUBSCRIPTION_ID: "$ARM_SUBSCRIPTION_ID_${ENVIRONMENT}"
