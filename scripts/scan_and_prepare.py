@@ -25,14 +25,13 @@ def ensure_env_folders(project_path):
     for env in ENVIRONMENTS:
         os.makedirs(os.path.join(env_dir, env), exist_ok=True)
 
-def create_backend_files(subgroup, location="eastus"):
-    """Generate backend.hcl for each environment"""
+def create_backend_files(subgroup, project_name):
     os.makedirs("terraform/backend_templates", exist_ok=True)
     for env in ENVIRONMENTS:
         backend_content = f"""
 resource_group_name  = "{subgroup}-{env}-rg"
-storage_account_name = "{subgroup}{env}sa"
-container_name       = "{{{{CI_PROJECT_NAME}}}}-container"
+storage_account_name = "st{subgroup}{env}"  # Terraform will add random suffix
+container_name       = "{project_name}-container"
 key                  = "terraform.tfstate"
 """
         with open(f"terraform/backend_templates/backend_{env}.hcl", "w") as f:
@@ -64,8 +63,6 @@ def main():
         subgroup_id = sg["id"]
         print(f"🔍 Processing subgroup: {subgroup_name}")
 
-        create_backend_files(subgroup_name)
-
         # Get all projects in subgroup
         projects = get(f"{GITLAB_API}/groups/{subgroup_id}/projects?per_page=100", token)
         for proj in projects:
@@ -74,6 +71,7 @@ def main():
             print(f"  📁 Checking project: {project_name}")
             ensure_env_folders(f"./{project_name}")
             check_project_vars(project_id, token, subgroup_name)
+            create_backend_files(subgroup_name, project_name)
 
     print("✅ Completed scanning and backend file generation.")
 
