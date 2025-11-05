@@ -1,141 +1,81 @@
+#!/usr/bin/env python3
 import os
+import sys
+import json
 import requests
 
-# ────────────────────────────────
-# CONFIGURATION
-# ────────────────────────────────
-GITLAB_URL = os.getenv("GITLAB_URL", "https://gitlab.com")
-GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")  # Personal Access Token
+GITLAB_API = "https://gitlab.com/api/v4"
+TOP_GROUP_ID = 795  # Azure Infrastructure group ID
 ENVIRONMENTS = ["QA", "UAT", "PROD"]
-HEADERS = {
-    "PRIVATE-TOKEN": GITLAB_TOKEN,
-    "Content-Type": "application/json"
-}
+REQUIRED_VARS = [
+    "ARM_CLIENT_ID",
+    "ARM_CLIENT_SECRET",
+    "ARM_TENANT_ID",
+    "ARM_SUBSCRIPTION_ID"
+]
 
-# Known subgroup IDs for reference (optional, can be removed if fully dynamic)
-SUBGROUPS = {
-    792: "neteng",
-    791: "wineng"
-}
+def get(url, token):
+    r = requests.get(url, headers={"PRIVATE-TOKEN": token})
+    r.raise_for_status()
+    return r.json()
 
-# ────────────────────────────────
-# HELPER FUNCTIONS
-# ────────────────────────────────
-def get_parent_subgroup(project_name):
-    """
-    Searches all known subgroups for the project and returns the subgroup ID
-    """
-    for subgroup_id in SUBGROUPS.keys():
-        search_url = f"{GITLAB_URL}/api/v4/groups/{subgroup_id}/projects?search={project_name}"
-        r = requests.get(search_url, headers=HEADERS)
-        if r.status_code == 200 and len(r.json()) > 0:
-            return r.json()[0]["namespace"]["id"]  # subgroup ID
-    return None
-
-
-def create_project(subgroup_id, project_name):
-    # Check if project exists
-    search_url = f"{GITLAB_URL}/api/v4/groups/{subgroup_id}/projects?search={project_name}"
-    r = requests.get(search_url, headers=HEADERS)
-    if r.status_code == 200 and len(r.json()) > 0:
-        project = r.json()[0]
-        print(f"✅ Project already exists: {project['web_url']}")
-        return project
-
-    # Create project
-    print(f"📁 Creating project {project_name} under subgroup ID {subgroup_id}")
-    payload = {
-        "name": project_name,
-        "namespace_id": subgroup_id,
-        "initialize_with_readme": True,
-        "visibility": "private"
-    }
-    create_url = f"{GITLAB_URL}/api/v4/projects"
-    r = requests.post(create_url, headers=HEADERS, json=payload)
-    if r.status_code == 201:
-        project = r.json()
-        print(f"✅ Created: {project['web_url']}")
-        return project
-    else:
-        print(f"❌ Failed to create project: {r.text}")
-        return None
-
-
-def create_environment_folders(project):
-    project_id = project["id"]
-    print("📁 Creating environment folders (QA, UAT, PROD)...")
-
-    actions = []
+def ensure_env_folders(project_path):
+    env_dir = os.path.join(project_path, "environment")
+    os.makedirs(env_dir, exist_ok=True)
     for env in ENVIRONMENTS:
-        path = f"environments/{env}/.keep"
-        content = f"# {env} environment folder\n"
-        actions.append({"action": "create", "file_path": path, "content": content})
+        os.makedirs(os.path.join(env_dir, env), exist_ok=True)
 
-    commit_payload = {
-        "branch": "main",
-        "commit_message": "Add environments folders (QA, UAT, PROD)",
-        "actions": actions
-    }
+def create_backend_files(subgroup, location="eastus"):
+    """Generate backend.hcl for each environment"""
+    os.makedirs("terraform/backend_templates", exist_ok=True)
+    for env in ENVIRONMENTS:
+        backend_content = f"""
+resource_group_name  = "{subgroup}-{env}-rg"
+storage_account_name = "{subgroup}{env}sa"
+container_name       = "{{{{CI_PROJECT_NAME}}}}-container"
+key                  = "terraform.tfstate"
+"""
+        with open(f"terraform/backend_templates/backend_{env}.hcl", "w") as f:
+            f.write(backend_content.strip())
 
-    commit_url = f"{GITLAB_URL}/api/v4/projects/{project_id}/repository/commits"
-    r = requests.post(commit_url, headers=HEADERS, json=commit_payload)
-    if r.status_code == 201:
-        print("✅ Environments folders created.")
-    else:
-        print(f"❌ Failed to create folders: {r.text}")
-
-
-def create_ci_variables(project):
-    project_id = project["id"]
-    print("🔐 Creating CI/CD variables per environment...")
+def check_project_vars(project_id, token, subgroup):
+    url = f"{GITLAB_API}/projects/{project_id}/variables"
+    vars_in_project = get(url, token)
+    var_names = [v["key"] for v in vars_in_project]
 
     for env in ENVIRONMENTS:
-        for var in ["ARM_CLIENT_ID", "ARM_CLIENT_SECRET", "ARM_TENANT_ID", "ARM_SUBSCRIPTION_ID"]:
-            key = f"{env}_{var}"
-            value = f"PLACEHOLDER_{env}_{var}"
+        for base_var in REQUIRED_VARS:
+            var_name = f"{base_var}_{env}"
+            if var_name not in var_names:
+                print(f"⚠️ Warning: Missing variable {var_name} in project {project_id} ({subgroup}/{env})")
 
-            payload = {
-                "key": key,
-                "value": value,
-                "masked": True,
-                "protected": False
-            }
-
-            url = f"{GITLAB_URL}/api/v4/projects/{project_id}/variables"
-            r = requests.post(url, headers=HEADERS, json=payload)
-            if r.status_code != 201:
-                print(f"⚠️ Could not create {key}: {r.text}")
-
-    print("✅ CI/CD variables created per environment.")
-
-
-# ────────────────────────────────
-# MAIN
-# ────────────────────────────────
 def main():
-    if not GITLAB_TOKEN:
-        print("❌ Missing GITLAB_TOKEN environment variable.")
-        return
+    if len(sys.argv) != 2:
+        print("Usage: python3 scan_and_prepare.py <gitlab_token>")
+        sys.exit(1)
 
-    # Project name comes from CI/CD variable
-    project_name = os.getenv("CI_PROJECT_NAME_OVERRIDE")
-    if not project_name:
-        print("❌ CI_PROJECT_NAME_OVERRIDE not set in pipeline variables.")
-        return
+    token = sys.argv[1]
 
-    # Detect subgroup automatically
-    subgroup_id = get_parent_subgroup(project_name)
-    if not subgroup_id:
-        print("❌ Could not detect parent subgroup automatically.")
-        return
+    # Get all subgroups under top-level group
+    subgroups = get(f"{GITLAB_API}/groups/{TOP_GROUP_ID}/subgroups?per_page=100", token)
 
-    project = create_project(subgroup_id, project_name)
-    if project:
-        create_environment_folders(project)
-        create_ci_variables(project)
+    for sg in subgroups:
+        subgroup_name = sg["name"]
+        subgroup_id = sg["id"]
+        print(f"🔍 Processing subgroup: {subgroup_name}")
 
-    print("🎉 Project setup complete!")
+        create_backend_files(subgroup_name)
 
+        # Get all projects in subgroup
+        projects = get(f"{GITLAB_API}/groups/{subgroup_id}/projects?per_page=100", token)
+        for proj in projects:
+            project_name = proj["name"]
+            project_id = proj["id"]
+            print(f"  📁 Checking project: {project_name}")
+            ensure_env_folders(f"./{project_name}")
+            check_project_vars(project_id, token, subgroup_name)
+
+    print("✅ Completed scanning and backend file generation.")
 
 if __name__ == "__main__":
     main()
