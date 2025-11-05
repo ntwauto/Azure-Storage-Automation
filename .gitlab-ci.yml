@@ -1,37 +1,40 @@
 stages:
-  - prepare
+  - inject_backend
   - terraform
 
 variables:
-  TF_VAR_subgroup: "$SUBGROUP"
-  TF_VAR_project_name: "$CI_PROJECT_NAME"
   TF_VAR_location: "eastus"
 
-prepare:
-  stage: prepare
+inject_backend:
+  stage: inject_backend
   image: python:3.11
-  before_script:
-    - pip install requests
   script:
-    - python3 scripts/scan_and_prepare.py "$GITLAB_TOKEN"
+    - python3 scripts/inject_backend.py "$PROJECT_NAME" "$SUBGROUP"
   artifacts:
     paths:
-      - terraform/backend_templates/
+      - "$PROJECT_NAME/environment/*/backend.hcl"
     expire_in: 1 hour
 
 terraform_apply:
   stage: terraform
   image: hashicorp/terraform:1.7.0
-  needs: ["prepare"]
+  needs: ["inject_backend"]
   parallel:
     matrix:
       - ENVIRONMENT: ["QA", "UAT", "PROD"]
 
   script:
-    - cd terraform
-    - echo "🔧 Using backend config for ${ENVIRONMENT}"
-    - terraform init -backend-config="backend_templates/backend_${ENVIRONMENT}.hcl"
-    - terraform plan -out=tfplan -var "environment=${ENVIRONMENT}"
+    - ENV_BACKEND="$PROJECT_NAME/environment/${ENVIRONMENT}/backend.hcl"
+    - echo "🔧 Using backend: $ENV_BACKEND"
+    - terraform init -backend-config="$ENV_BACKEND"
+    - terraform plan -out=tfplan \
+        -var "project_name=$PROJECT_NAME" \
+        -var "subgroup=$SUBGROUP" \
+        -var "environment=${ENVIRONMENT}" \
+        -var "arm_client_id=${ARM_CLIENT_ID_${ENVIRONMENT}}" \
+        -var "arm_client_secret=${ARM_CLIENT_SECRET_${ENVIRONMENT}}" \
+        -var "arm_tenant_id=${ARM_TENANT_ID_${ENVIRONMENT}}" \
+        -var "arm_subscription_id=${ARM_SUBSCRIPTION_ID_${ENVIRONMENT}}"
     - terraform apply -auto-approve tfplan
 
   variables:
