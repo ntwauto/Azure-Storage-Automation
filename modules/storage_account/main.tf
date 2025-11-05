@@ -9,14 +9,9 @@ resource "azurerm_storage_account" "sa" {
   location                 = var.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
-
-  tags = {
-    subgroup    = var.subgroup
-    environment = var.environment
-  }
 }
 
-resource "azurerm_storage_container" "project_container" {
+resource "azurerm_storage_container" "container" {
   name                  = var.container_name
   storage_account_name  = azurerm_storage_account.sa.name
   container_access_type = "private"
