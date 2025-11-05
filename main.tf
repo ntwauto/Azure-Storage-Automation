@@ -1,8 +1,3 @@
-variable "subgroup" {}
-variable "project_name" {}
-variable "location" { default = "eastus" }
-variable "environment" {}
-
 module "storage" {
   source = "./modules/storage_account"
 
