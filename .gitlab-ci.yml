@@ -28,3 +28,5 @@ terraform_apply:
     ARM_CLIENT_SECRET: "$ARM_CLIENT_SECRET_${ENVIRONMENT}"
     ARM_TENANT_ID: "$ARM_TENANT_ID_${ENVIRONMENT}"
     ARM_SUBSCRIPTION_ID: "$ARM_SUBSCRIPTION_ID_${ENVIRONMENT}"
+
+I want to automate remote azure storage using terraform and terraform modules and also want to create only one account for each environment QA, UAT, and PROD per subgroup. for example if we have two subgroups one called neteng and one called wineng under top group called Azure Infrastructure we will have 6 account per total. Having said that, each environment will have it's own SPNs. Also need a script that will scan the top level group called Azure infrastructure with group id 795 for any subgroups and projects and if there a project make sure it has a folder called environment and subfolder called QA, UAT, PROD and they have CI-CD Variables for SPNs if they don't through warning message in the ci-cd pipeline and continue. I have below ci-cd pipeline fix it and give me the terraform code and simple python script with main function. Need one robust best solution
